@@ -19,10 +19,11 @@ def assert_response_matches_contract(
     resource = Resource.from_contents(contract, default_specification=DRAFT202012)
     registry = Registry().with_resource(uri, resource)
     escaped = path.replace("~", "~0").replace("/", "~1")
-    pointer = (
-        f"{uri}#/paths/{escaped}/{method}/responses/{status}"
-        "/content/application~1json/schema"
-    )
+    response_spec = contract["paths"][path][method]["responses"][str(status)]
+    pointer = f"{uri}#/paths/{escaped}/{method}/responses/{status}"
+    if "$ref" in response_spec:
+        pointer = uri + response_spec["$ref"]
+    pointer += "/content/application~1json/schema"
     assert response.status_code == status, response.text
     assert response.headers["content-type"].startswith("application/json")
     Draft202012Validator({"$ref": pointer}, registry=registry).validate(response.json())

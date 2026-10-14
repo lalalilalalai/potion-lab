@@ -1,6 +1,13 @@
 """Справочник и вычисления лаборатории без зависимости от HTTP-фреймворка."""
 
-from generated.dto import Effect, Ingredient, IngredientId
+from generated.dto import BrewRequest, Effect, Ingredient, IngredientId, Potion
+
+EFFECT_PRIORITY = (Effect.healing, Effect.invisibility, Effect.speed, Effect.strength)
+
+
+class DuplicateIngredientError(ValueError):
+    """В рецепте повторяется один ингредиент."""
+
 
 _INGREDIENTS = (
     Ingredient(
@@ -44,3 +51,23 @@ _INGREDIENTS = (
 def list_ingredients() -> list[Ingredient]:
     """Вернуть копии, чтобы вызывающий код не изменил нормативный справочник."""
     return [ingredient.model_copy(deep=True) for ingredient in _INGREDIENTS]
+
+
+def brew_potion(recipe: BrewRequest) -> Potion:
+    ids = [portion.ingredient_id for portion in recipe.ingredients]
+    if len(set(ids)) != len(ids):
+        raise DuplicateIngredientError
+    catalog = {ingredient.id: ingredient for ingredient in _INGREDIENTS}
+    scores = dict.fromkeys(EFFECT_PRIORITY, 0)
+    instability = 0
+    for portion in recipe.ingredients:
+        ingredient = catalog[portion.ingredient_id]
+        scores[ingredient.effect] += ingredient.potency * portion.quantity
+        instability += ingredient.instability * portion.quantity
+    effect = max(EFFECT_PRIORITY, key=scores.__getitem__)
+    return Potion(
+        name=recipe.name,
+        effect=effect,
+        power=min(scores[effect], 100),
+        instability=min(instability, 100),
+    )

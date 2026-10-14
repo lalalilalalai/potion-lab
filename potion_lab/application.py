@@ -8,14 +8,34 @@ from typing import Annotated
 
 import yaml
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import Field
 
-from generated.dto import HealthResponse, Ingredient, VersionResponse
+from generated.dto import (
+    BrewRequest,
+    BusinessError,
+    Code,
+    Detail,
+    HealthResponse,
+    HTTPValidationError,
+    Ingredient,
+    Potion,
+    VersionResponse,
+)
 from potion_lab import domain
 from potion_lab.settings import Settings, load_settings
 
 logger = logging.getLogger("potion_lab")
 CONTRACT_PATH = Path(__file__).resolve().parents[1] / "openapi.yaml"
+
+
+def _log_route(request: Request) -> str:
+    route = getattr(request.scope.get("route"), "path", None)
+    if route is not None:
+        return route
+    path = request.scope.get("path")
+    return path if path in ("/docs", "/openapi.json") else "<неизвестный>"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -52,19 +72,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.openapi = source_openapi
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, error: RequestValidationError):
+        request.state.error_code = "validation_error"
+        details = [
+            {"loc": list(issue["loc"]), "msg": issue["msg"], "type": issue["type"]}
+            for issue in error.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": details})
+
     @app.middleware("http")
     async def log_request(request: Request, call_next):
         try:
             response = await call_next(request)
         except Exception:
-            route = getattr(request.scope.get("route"), "path", "<неизвестный>")
+            route = _log_route(request)
             logger.error(
                 "Ошибка операции method=%s route=%s status=500",
                 request.method,
                 route,
             )
             raise
-        route = getattr(request.scope.get("route"), "path", "<неизвестный>")
+        route = _log_route(request)
         if response.status_code >= 500:
             level = logging.ERROR
         elif response.status_code >= 400:
@@ -73,10 +102,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             level = logging.INFO
         logger.log(
             level,
-            "Запрос завершён method=%s route=%s status=%d",
+            "Запрос завершён method=%s route=%s status=%d code=%s",
             request.method,
             route,
             response.status_code,
+            getattr(
+                request.state,
+                "error_code",
+                "http_error" if level >= logging.WARNING else "ok",
+            ),
         )
         return response
 
@@ -96,5 +130,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def get_ingredients() -> list[Ingredient]:
         return domain.list_ingredients()
+
+    @app.post(
+        "/potions/brew",
+        response_model=Potion,
+        operation_id="brew_potion",
+        tags=["Potions"],
+        responses={
+            400: {"model": BusinessError},
+            422: {"model": HTTPValidationError},
+        },
+    )
+    async def brew_potion(
+        recipe: BrewRequest, request: Request
+    ) -> Potion | JSONResponse:
+        try:
+            return domain.brew_potion(recipe)
+        except domain.DuplicateIngredientError:
+            request.state.error_code = "duplicate_ingredient"
+            error = BusinessError(
+                detail=Detail(
+                    code=Code.duplicate_ingredient,
+                    message="Каждый ингредиент можно указать только один раз.",
+                )
+            )
+            return JSONResponse(status_code=400, content=error.model_dump(mode="json"))
 
     return app
