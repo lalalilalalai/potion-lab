@@ -21,6 +21,8 @@ from generated.dto import (
     HTTPValidationError,
     Ingredient,
     Potion,
+    Reaction,
+    ReactRequest,
     VersionResponse,
 )
 from potion_lab import domain
@@ -96,21 +98,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         route = _log_route(request)
         if response.status_code >= 500:
             level = logging.ERROR
-        elif response.status_code >= 400:
+        elif (
+            response.status_code >= 400
+            or getattr(request.state, "outcome", None) == "explosion"
+        ):
             level = logging.WARNING
         else:
             level = logging.INFO
         logger.log(
             level,
-            "Запрос завершён method=%s route=%s status=%d code=%s",
+            "Запрос завершён method=%s route=%s status=%d code=%s outcome=%s",
             request.method,
             route,
             response.status_code,
             getattr(
                 request.state,
                 "error_code",
-                "http_error" if level >= logging.WARNING else "ok",
+                "http_error" if response.status_code >= 400 else "ok",
             ),
+            getattr(request.state, "outcome", "-"),
         )
         return response
 
@@ -155,5 +161,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 )
             )
             return JSONResponse(status_code=400, content=error.model_dump(mode="json"))
+
+    @app.post(
+        "/potions/react",
+        response_model=Reaction,
+        operation_id="react_potions",
+        tags=["Potions"],
+        responses={422: {"model": HTTPValidationError}},
+    )
+    async def react_potions(experiment: ReactRequest, request: Request) -> Reaction:
+        result = domain.react_potions(experiment)
+        request.state.outcome = getattr(
+            result.root.outcome, "value", result.root.outcome
+        )
+        return result
 
     return app

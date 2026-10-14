@@ -1,6 +1,17 @@
 """Справочник и вычисления лаборатории без зависимости от HTTP-фреймворка."""
 
-from generated.dto import BrewRequest, Effect, Ingredient, IngredientId, Potion
+from generated.dto import (
+    BrewRequest,
+    Effect,
+    ExplosionReaction,
+    Ingredient,
+    IngredientId,
+    Outcome,
+    Potion,
+    Reaction,
+    ReactRequest,
+    SuccessfulReaction,
+)
 
 EFFECT_PRIORITY = (Effect.healing, Effect.invisibility, Effect.speed, Effect.strength)
 
@@ -70,4 +81,34 @@ def brew_potion(recipe: BrewRequest) -> Potion:
         effect=effect,
         power=min(scores[effect], 100),
         instability=min(instability, 100),
+    )
+
+
+def react_potions(experiment: ReactRequest) -> Reaction:
+    first, second = experiment.potions
+    instability = min(first.instability + second.instability, 100)
+    if instability >= 80:
+        return Reaction(root=ExplosionReaction(outcome="explosion", potion=None))
+    if first.effect == second.effect:
+        outcome = Outcome.amplified
+        effect = first.effect
+        power = min(first.power + second.power, 100)
+    else:
+        outcome = Outcome.merged
+        strongest = max(
+            (first, second),
+            key=lambda item: (item.power, -EFFECT_PRIORITY.index(item.effect)),
+        )
+        effect = strongest.effect
+        power = (first.power + second.power) // 2
+    return Reaction(
+        root=SuccessfulReaction(
+            outcome=outcome,
+            potion=Potion(
+                name="Лабораторная смесь",
+                effect=effect,
+                power=power,
+                instability=instability,
+            ),
+        )
     )
