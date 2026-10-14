@@ -8,8 +8,8 @@ info:
     все необходимые данные передаются в запросе, результаты вычисляются
     детерминированно. Авторизация не требуется.
 servers:
-  - url: http://localhost:8000
-    description: Локальный сервер FastAPI
+  - url: /
+    description: Текущий сервер
 tags:
   - name: Ingredients
     description: Справочник ингредиентов
