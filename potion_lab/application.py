@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 from fastapi import FastAPI, Request
 
-from generated.dto import HealthResponse
+from generated.dto import HealthResponse, VersionResponse
 from potion_lab.settings import Settings, load_settings
 
 logger = logging.getLogger("potion_lab")
@@ -80,5 +80,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", response_model=HealthResponse, operation_id="get_health")
     async def get_health() -> HealthResponse:
         return HealthResponse(status="ok")
+
+    @app.get("/version", response_model=VersionResponse, operation_id="get_version")
+    async def get_version() -> VersionResponse:
+        return VersionResponse(version=version)
 
     return app
