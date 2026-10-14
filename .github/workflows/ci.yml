@@ -25,7 +25,7 @@ jobs:
         run: python -m openapi_spec_validator openapi.yaml
       - name: Проверить актуальность DTO
         run: python scripts/generate_dto.py --check
-      - name: Проверить поведение и лимиты коллекции
+      - name: Запустить тесты
         run: python -m pytest -v -W error
       - name: Проверить линтер
         run: python -m ruff check .
