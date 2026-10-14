@@ -26,6 +26,7 @@ from generated.dto import (
     VersionResponse,
 )
 from potion_lab import domain
+from potion_lab.logging_config import STARTUP_ART
 from potion_lab.settings import Settings, load_settings
 
 logger = logging.getLogger("potion_lab")
@@ -47,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        logger.info(STARTUP_ART)
         logger.info(
             "Приложение инициализировано APP_NAME=%r APP_VERSION=%s "
             "host=127.0.0.1 port=%d LOG_LEVEL=%s",
