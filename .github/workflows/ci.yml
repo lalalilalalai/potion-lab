@@ -1,0 +1,74 @@
+name: Проверки и runtime artifact
+
+"on": [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Установить зависимости
+        run: python -m pip install -r requirements-dev.txt
+      - name: Проверить зависимости
+        run: python -m pip check
+      - name: Проверить исходный OpenAPI
+        run: python -m openapi_spec_validator openapi.yaml
+      - name: Проверить актуальность DTO
+        run: python scripts/generate_dto.py --check
+      - name: Проверить поведение и лимиты коллекции
+        run: python -m pytest -v -W error
+      - name: Проверить линтер
+        run: python -m ruff check .
+      - name: Проверить форматирование
+        run: python -m ruff format --check .
+
+  package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Добавить инструкцию запуска artifact
+        run: |
+          cat > RUNNING.md <<'EOF'
+          # Запуск potion-lab
+
+          Требуется Python 3.12+. Из каталога распакованного artifact:
+
+          ```bash
+          python3.12 -m venv .venv
+          source .venv/bin/activate
+          python -m pip install -r requirements.txt
+          python -m pip check
+          bash run.sh
+          ```
+
+          Адрес: http://127.0.0.1:8000, Swagger: /docs, схема: /openapi.json.
+          Остановка: Ctrl+C. Проверка: curl -i http://127.0.0.1:8000/health.
+          DTO сохранены; генератор не нужен. .env автоматически не читается.
+          Пример: APP_PORT=8123 LOG_LEVEL=WARNING bash run.sh.
+          API и примеры тел запросов приведены в Swagger и openapi.yaml.
+          EOF
+      - name: Сохранить runtime artifact
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: potion-lab
+          path: |
+            potion_lab/
+            generated/
+            requirements.txt
+            openapi.yaml
+            run.sh
+            LICENSE
+            RUNNING.md
+          if-no-files-found: error
+          retention-days: 7
