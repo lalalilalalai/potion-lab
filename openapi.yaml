@@ -1,0 +1,359 @@
+openapi: 3.1.0
+info:
+  title: Магическая лаборатория
+  version: 1.0.0
+  description: |
+    Учебный REST API на FastAPI без базы данных и внешних сервисов.
+    Справочник ингредиентов хранится в коде. Варка и реакции не сохраняются:
+    все необходимые данные передаются в запросе, результаты вычисляются
+    детерминированно. Авторизация не требуется.
+servers:
+  - url: http://localhost:8000
+    description: Локальный сервер FastAPI
+tags:
+  - name: Ingredients
+    description: Справочник ингредиентов
+  - name: Potions
+    description: Варка зелий и магические реакции
+paths:
+  /health:
+    get:
+      operationId: get_health
+      summary: Проверить работоспособность сервиса
+      responses:
+        '200':
+          description: Сервис работает
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example: {status: ok}
+  /version:
+    get:
+      operationId: get_version
+      summary: Получить версию приложения
+      responses:
+        '200':
+          description: Версия из info.version исходного контракта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+              example: {version: '1.0.0'}
+  /ingredients:
+    get:
+      tags: [Ingredients]
+      operationId: list_ingredients
+      summary: Получить справочник ингредиентов
+      description: |
+        Возвращает полный справочник из пяти ингредиентов.
+        Каждый ингредиент даёт очки одному эффекту и имеет нестабильность.
+        Пример ответа 200 задаёт нормативный справочник: идентификаторы,
+        имена, эффекты, potency и instability совпадают с ним.
+      responses:
+        '200':
+          description: Справочник ингредиентов
+          content:
+            application/json:
+              schema:
+                type: array
+                minItems: 5
+                maxItems: 5
+                items:
+                  $ref: '#/components/schemas/Ingredient'
+              example:
+                - {id: moon_dust, name: Лунная пыль, effect: invisibility, potency: 8, instability: 3}
+                - {id: dragon_scale, name: Чешуя дракона, effect: strength, potency: 10, instability: 5}
+                - {id: phoenix_feather, name: Перо феникса, effect: healing, potency: 9, instability: 2}
+                - {id: wind_leaf, name: Лист ветра, effect: speed, potency: 7, instability: 1}
+                - {id: troll_moss, name: Мох тролля, effect: healing, potency: 4, instability: 4}
+  /potions/brew:
+    post:
+      tags: [Potions]
+      operationId: brew_potion
+      summary: Сварить зелье из ингредиентов
+      description: |
+        Принимает от 1 до 5 разных ингредиентов, по 1–10 единиц каждого.
+        Повтор одного ingredient_id запрещён и возвращает 400.
+        Неизвестный ingredient_id возвращает 422 как нарушение enum.
+
+        Очки эффекта — сумма potency * quantity для ингредиентов этого эффекта.
+        Побеждает эффект с наибольшим числом очков. При равенстве приоритет:
+        healing, invisibility, speed, strength.
+        Сила зелья — очки победившего эффекта, ограниченные сверху 100.
+        Нестабильность — сумма instability * quantity всех ингредиентов,
+        ограниченная сверху 100. Имя зелья копируется из запроса.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrewRequest'
+            example:
+              name: Эликсир тихого шага
+              ingredients:
+                - {ingredient_id: moon_dust, quantity: 2}
+                - {ingredient_id: wind_leaf, quantity: 1}
+      responses:
+        '200':
+          description: Зелье сварено; результат не сохраняется
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Potion'
+              example:
+                name: Эликсир тихого шага
+                effect: invisibility
+                power: 16
+                instability: 7
+        '400':
+          description: В рецепте повторяется ингредиент
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessError'
+              example:
+                detail:
+                  code: duplicate_ingredient
+                  message: Каждый ингредиент можно указать только один раз.
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /potions/react:
+    post:
+      tags: [Potions]
+      operationId: react_potions
+      summary: Смешать два зелья
+      description: |
+        Принимает полные описания двух зелий, например результаты /potions/brew.
+        Можно передать и собственные зелья, соответствующие схеме Potion.
+        Общая нестабильность — сумма instability двух зелий, максимум 100.
+
+        Правила применяются по порядку:
+        1. При общей нестабильности >= 80 происходит взрыв (explosion).
+           Результирующего зелья нет: potion = null.
+        2. При одинаковых эффектах зелья усиливаются (amplified).
+           Эффект сохраняется, сила равна сумме power, максимум 100.
+        3. При разных эффектах происходит слияние (merged).
+           Побеждает эффект более сильного зелья; при равенстве действует
+           приоритет healing, invisibility, speed, strength.
+           Сила равна округлённому вниз среднему арифметическому power.
+
+        При успешном смешивании имя результата — «Лабораторная смесь»,
+        instability равна общей нестабильности. Порядок зелий не влияет
+        на результат. Взрыв — нормальный результат эксперимента с HTTP 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReactRequest'
+            example:
+              potions:
+                - {name: Малое исцеление, effect: healing, power: 18, instability: 4}
+                - {name: Лесной бальзам, effect: healing, power: 12, instability: 12}
+      responses:
+        '200':
+          description: Результат реакции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reaction'
+              examples:
+                amplified:
+                  summary: Усиление одинаковых эффектов
+                  value:
+                    outcome: amplified
+                    potion: {name: Лабораторная смесь, effect: healing, power: 30, instability: 16}
+                merged:
+                  summary: Слияние разных эффектов
+                  value:
+                    outcome: merged
+                    potion: {name: Лабораторная смесь, effect: speed, power: 20, instability: 10}
+                explosion:
+                  summary: Слишком нестабильная смесь
+                  value:
+                    outcome: explosion
+                    potion: null
+        '422':
+          $ref: '#/components/responses/ValidationError'
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+    VersionResponse:
+      type: object
+      additionalProperties: false
+      required: [version]
+      properties:
+        version:
+          type: string
+          const: '1.0.0'
+    Effect:
+      type: string
+      enum: [healing, invisibility, speed, strength]
+      description: Исцеление, невидимость, скорость или сила.
+    IngredientId:
+      type: string
+      enum: [moon_dust, dragon_scale, phoenix_feather, wind_leaf, troll_moss]
+    Ingredient:
+      type: object
+      additionalProperties: false
+      required: [id, name, effect, potency, instability]
+      properties:
+        id:
+          $ref: '#/components/schemas/IngredientId'
+        name:
+          type: string
+          minLength: 1
+        effect:
+          $ref: '#/components/schemas/Effect'
+        potency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Очки эффекта на единицу ингредиента.
+        instability:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: Нестабильность на единицу ингредиента.
+    IngredientPortion:
+      type: object
+      additionalProperties: false
+      required: [ingredient_id, quantity]
+      properties:
+        ingredient_id:
+          $ref: '#/components/schemas/IngredientId'
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 10
+    BrewRequest:
+      type: object
+      additionalProperties: false
+      required: [name, ingredients]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '\S'
+          description: Имя зелья; должно содержать хотя бы один непробельный символ.
+        ingredients:
+          type: array
+          minItems: 1
+          maxItems: 5
+          description: Значения ingredient_id должны быть уникальны.
+          items:
+            $ref: '#/components/schemas/IngredientPortion'
+    Potion:
+      type: object
+      additionalProperties: false
+      required: [name, effect, power, instability]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          pattern: '\S'
+        effect:
+          $ref: '#/components/schemas/Effect'
+        power:
+          type: integer
+          minimum: 1
+          maximum: 100
+        instability:
+          type: integer
+          minimum: 0
+          maximum: 100
+    ReactRequest:
+      type: object
+      additionalProperties: false
+      required: [potions]
+      properties:
+        potions:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/Potion'
+    Reaction:
+      oneOf:
+        - $ref: '#/components/schemas/SuccessfulReaction'
+        - $ref: '#/components/schemas/ExplosionReaction'
+    SuccessfulReaction:
+      type: object
+      additionalProperties: false
+      required: [outcome, potion]
+      properties:
+        outcome:
+          type: string
+          enum: [amplified, merged]
+        potion:
+          $ref: '#/components/schemas/Potion'
+    ExplosionReaction:
+      type: object
+      additionalProperties: false
+      required: [outcome, potion]
+      properties:
+        outcome:
+          type: string
+          const: explosion
+        potion:
+          type: 'null'
+    BusinessError:
+      type: object
+      additionalProperties: false
+      required: [detail]
+      properties:
+        detail:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [duplicate_ingredient]
+            message:
+              type: string
+    HTTPValidationError:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationIssue'
+    ValidationIssue:
+      type: object
+      description: Ошибка валидации FastAPI/Pydantic; возможны дополнительные поля input и ctx.
+      required: [loc, msg, type]
+      properties:
+        loc:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+        msg:
+          type: string
+        type:
+          type: string
+  responses:
+    ValidationError:
+      description: Тело запроса отсутствует, содержит неверные типы, значения или лишние поля.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HTTPValidationError'
+          example:
+            detail:
+              - loc: [body, ingredients, 0, quantity]
+                msg: Input should be greater than or equal to 1
+                type: greater_than_equal
