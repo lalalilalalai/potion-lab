@@ -4,11 +4,14 @@ import logging
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from pathlib import Path
+from typing import Annotated
 
 import yaml
 from fastapi import FastAPI, Request
+from pydantic import Field
 
-from generated.dto import HealthResponse, VersionResponse
+from generated.dto import HealthResponse, Ingredient, VersionResponse
+from potion_lab import domain
 from potion_lab.settings import Settings, load_settings
 
 logger = logging.getLogger("potion_lab")
@@ -84,5 +87,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/version", response_model=VersionResponse, operation_id="get_version")
     async def get_version() -> VersionResponse:
         return VersionResponse(version=version)
+
+    @app.get(
+        "/ingredients",
+        response_model=Annotated[list[Ingredient], Field(min_length=5, max_length=5)],
+        operation_id="list_ingredients",
+        tags=["Ingredients"],
+    )
+    async def get_ingredients() -> list[Ingredient]:
+        return domain.list_ingredients()
 
     return app
